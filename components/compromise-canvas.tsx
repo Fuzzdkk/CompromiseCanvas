@@ -64,6 +64,7 @@ export default function CompromiseCanvas() {
     bulkStatusNodeCount,
     allBulkStatusNodesCompromised,
     bulkInvestigationStatus,
+    edgeRoutePreview,
     snapToGrid,
     showTemplatePanel,
     showTimelinePanel,
@@ -102,6 +103,9 @@ export default function CompromiseCanvas() {
     handleSelectionLayout,
     handleToggleSelectedCompromised,
     handleSetSelectedInvestigationStatus,
+    handleBeginEdgeRouteDrag,
+    handlePreviewEdgeRouteDrag,
+    handleCommitEdgeRouteDrag,
     hasClipboardData,
     setupKeyboardHandlers,
     toast,
@@ -211,12 +215,6 @@ export default function CompromiseCanvas() {
     [updateEdge],
   )
 
-  // Reposition an edge's control point (dropped after a drag), undo-safe via updateEdge
-  const handleSetEdgeLabelOffset = useCallback(
-    (id: string, x: number, y: number) => updateEdge(id, { labelOffsetX: x, labelOffsetY: y }),
-    [updateEdge],
-  )
-
   // Toggle whether an edge is unlocked for manual routing, undo-safe via updateEdge
   const handleToggleEdgeUnlocked = useCallback(
     (id: string) => {
@@ -228,8 +226,26 @@ export default function CompromiseCanvas() {
 
   // Memoize edge types to prevent recreation on every render during dragging
   const edgeTypes = useMemo(
-    () => createEdgeTypes(animationsEnabled, selectedElement, deleteEdgeById, handleSetEdgeActionType, handleSetEdgeLabelOffset, handleToggleEdgeUnlocked),
-    [animationsEnabled, selectedElement, deleteEdgeById, handleSetEdgeActionType, handleSetEdgeLabelOffset, handleToggleEdgeUnlocked],
+    () => createEdgeTypes(
+      animationsEnabled,
+      selectedElement,
+      deleteEdgeById,
+      handleSetEdgeActionType,
+      handleBeginEdgeRouteDrag,
+      handlePreviewEdgeRouteDrag,
+      handleCommitEdgeRouteDrag,
+      handleToggleEdgeUnlocked,
+    ),
+    [
+      animationsEnabled,
+      selectedElement,
+      deleteEdgeById,
+      handleSetEdgeActionType,
+      handleBeginEdgeRouteDrag,
+      handlePreviewEdgeRouteDrag,
+      handleCommitEdgeRouteDrag,
+      handleToggleEdgeUnlocked,
+    ],
   )
 
   const copySelection = useCallback(() => {
@@ -307,7 +323,11 @@ export default function CompromiseCanvas() {
           <AssetLibrary />
         )}
         <div className="flex-1 relative" ref={reactFlowWrapper}>
-          <CanvasActionsProvider updateNode={updateNode} multiSelectionActive={multiSelectionActive}>
+          <CanvasActionsProvider
+            updateNode={updateNode}
+            multiSelectionActive={multiSelectionActive}
+            edgeRoutePreview={edgeRoutePreview}
+          >
             <ReactFlow
               nodes={nodes}
               edges={edges}

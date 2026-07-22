@@ -38,6 +38,39 @@ interface SelectionReference {
   kind: "node" | "edge"
 }
 
+interface EdgeRouteDragState {
+  activeEdgeId: string
+  activeStartX: number
+  activeStartY: number
+  affectedIds: Set<string>
+  startEdges: CustomEdge[]
+}
+
+interface EdgeRoutePreview {
+  activeEdgeId: string
+  affectedIds: string[]
+  deltaX: number
+  deltaY: number
+}
+
+const applyEdgeRouteDrag = (drag: EdgeRouteDragState, x: number, y: number) => {
+  const deltaX = x - drag.activeStartX
+  const deltaY = y - drag.activeStartY
+
+  return drag.startEdges.map((edge): CustomEdge => {
+    if (!drag.affectedIds.has(edge.id)) return edge
+
+    return {
+      ...edge,
+      data: {
+        ...edge.data,
+        labelOffsetX: (edge.data?.labelOffsetX ?? 0) + deltaX,
+        labelOffsetY: (edge.data?.labelOffsetY ?? 0) + deltaY,
+      } as CustomEdge["data"],
+    }
+  })
+}
+
 const createAutosaveContent = ({ nodes, edges, viewport, canvasTitle, incidentLog }: AutosaveContent): AutosaveContent => ({
   // Selection and drag flags are transient UI state and create noisy writes while moving around the canvas.
   nodes: nodes.map(({ selected: _selected, dragging: _dragging, ...node }) => node),
@@ -61,6 +94,12 @@ export const useCompromiseCanvasState = () => {
 
   const [nodes, setNodes, applyNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, setEdgesChange] = useEdgesState(initialEdges)
+  const [edgeRoutePreview, setEdgeRoutePreview] = useState<EdgeRoutePreview | null>(null)
+  const latestNodesRef = useRef(nodes)
+  const latestEdgesRef = useRef(edges)
+  const edgeRouteDragRef = useRef<EdgeRouteDragState | null>(null)
+  latestNodesRef.current = nodes
+  latestEdgesRef.current = edges
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
   const [selectionReference, setSelectionReference] = useState<SelectionReference | null>(null)
   const [snapToGrid, setSnapToGrid] = useState(true)
@@ -431,6 +470,59 @@ export const useCompromiseCanvasState = () => {
     [updateBulkStatusNodes],
   )
 
+  const handleBeginEdgeRouteDrag = useCallback((activeEdgeId: string) => {
+    const startEdges = latestEdgesRef.current
+    const activeEdge = startEdges.find((edge) => edge.id === activeEdgeId)
+    if (!activeEdge?.data?.unlocked) {
+      edgeRouteDragRef.current = null
+      return
+    }
+
+    const affectedEdges = activeEdge.selected
+      ? startEdges.filter((edge) => edge.selected && edge.data?.unlocked)
+      : [activeEdge]
+
+    edgeRouteDragRef.current = {
+      activeEdgeId,
+      activeStartX: activeEdge.data.labelOffsetX ?? 0,
+      activeStartY: activeEdge.data.labelOffsetY ?? 0,
+      affectedIds: new Set(affectedEdges.map((edge) => edge.id)),
+      startEdges,
+    }
+    setEdgeRoutePreview(null)
+  }, [])
+
+  const handlePreviewEdgeRouteDrag = useCallback(
+    (activeEdgeId: string, x: number, y: number) => {
+      const drag = edgeRouteDragRef.current
+      if (!drag || drag.activeEdgeId !== activeEdgeId || drag.affectedIds.size < 2) return
+
+      setEdgeRoutePreview({
+        activeEdgeId,
+        affectedIds: [...drag.affectedIds],
+        deltaX: x - drag.activeStartX,
+        deltaY: y - drag.activeStartY,
+      })
+    },
+    [],
+  )
+
+  const handleCommitEdgeRouteDrag = useCallback(
+    (activeEdgeId: string, x: number, y: number) => {
+      const drag = edgeRouteDragRef.current
+      if (!drag || drag.activeEdgeId !== activeEdgeId) return false
+
+      const committedEdges = applyEdgeRouteDrag(drag, x, y)
+      edgeRouteDragRef.current = null
+      setEdgeRoutePreview(null)
+      latestEdgesRef.current = committedEdges
+      setEdges(committedEdges)
+      takeSnapshot({ nodes: latestNodesRef.current, edges: committedEdges })
+      return true
+    },
+    [setEdges, takeSnapshot],
+  )
+
   const clearSelection = useCallback(() => {
     setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node))
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
@@ -501,6 +593,7 @@ export const useCompromiseCanvasState = () => {
     bulkStatusNodeCount: bulkStatusNodes.length,
     allBulkStatusNodesCompromised,
     bulkInvestigationStatus,
+    edgeRoutePreview,
     snapToGrid,
     showTemplatePanel,
     showTimelinePanel,
@@ -551,6 +644,9 @@ export const useCompromiseCanvasState = () => {
     handleSelectionLayout,
     handleToggleSelectedCompromised,
     handleSetSelectedInvestigationStatus,
+    handleBeginEdgeRouteDrag,
+    handlePreviewEdgeRouteDrag,
+    handleCommitEdgeRouteDrag,
     hasClipboardData,
     clearClipboard,
     // Keyboard handlers

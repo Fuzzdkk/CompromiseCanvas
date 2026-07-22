@@ -43,6 +43,8 @@ interface CustomEdgeProps extends EdgeProps<Edge<EdgeData>> {
   selected?: boolean
   onDeleteEdge?: (id: string) => void
   onSetEdgeActionType?: (id: string, actionType: EdgeActionType) => void
+  onBeginEdgeLabelDrag?: (id: string) => void
+  onPreviewEdgeLabelOffset?: (id: string, x: number, y: number) => void
   onSetEdgeLabelOffset?: (id: string, x: number, y: number) => void
   onToggleEdgeUnlocked?: (id: string) => void
 }
@@ -62,10 +64,12 @@ const CustomEdge = memo(function CustomEdge({
   selected = false,
   onDeleteEdge,
   onSetEdgeActionType,
+  onBeginEdgeLabelDrag,
+  onPreviewEdgeLabelOffset,
   onSetEdgeLabelOffset,
   onToggleEdgeUnlocked,
 }: CustomEdgeProps) {
-  const { multiSelectionActive } = useCanvasActions()
+  const { multiSelectionActive, edgeRoutePreview } = useCanvasActions()
   const unlocked = !!data?.unlocked
   // Track hover so the quick-action toolbar can appear without selecting the edge.
   const [hovered, setHovered] = useState(false)
@@ -113,8 +117,15 @@ const CustomEdge = memo(function CustomEdge({
   // data (undo-safe). Dragging either the line or the label moves the same point.
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
   const dragStart = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null)
-  const offsetX = drag ? drag.x : data?.labelOffsetX ?? 0
-  const offsetY = drag ? drag.y : data?.labelOffsetY ?? 0
+  const isGroupPreviewEdge = !!edgeRoutePreview &&
+    edgeRoutePreview.activeEdgeId !== id &&
+    edgeRoutePreview.affectedIds.includes(id)
+  const offsetX = drag
+    ? drag.x
+    : (data?.labelOffsetX ?? 0) + (isGroupPreviewEdge ? edgeRoutePreview.deltaX : 0)
+  const offsetY = drag
+    ? drag.y
+    : (data?.labelOffsetY ?? 0) + (isGroupPreviewEdge ? edgeRoutePreview.deltaY : 0)
 
   const onLabelPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -124,18 +135,22 @@ const CustomEdge = memo(function CustomEdge({
       const oy = data?.labelOffsetY ?? 0
       dragStart.current = { px: e.clientX, py: e.clientY, ox, oy }
       setDrag({ x: ox, y: oy })
+      onBeginEdgeLabelDrag?.(id)
       e.currentTarget.setPointerCapture(e.pointerId)
     },
-    [unlocked, data?.labelOffsetX, data?.labelOffsetY],
+    [unlocked, data?.labelOffsetX, data?.labelOffsetY, id, onBeginEdgeLabelDrag],
   )
   const onLabelPointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!dragStart.current) return
       const dx = (e.clientX - dragStart.current.px) / zoom
       const dy = (e.clientY - dragStart.current.py) / zoom
-      setDrag({ x: dragStart.current.ox + dx, y: dragStart.current.oy + dy })
+      const x = dragStart.current.ox + dx
+      const y = dragStart.current.oy + dy
+      setDrag({ x, y })
+      onPreviewEdgeLabelOffset?.(id, x, y)
     },
-    [zoom],
+    [zoom, id, onPreviewEdgeLabelOffset],
   )
   const onLabelPointerUp = useCallback(
     (e: React.PointerEvent) => {

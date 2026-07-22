@@ -48,12 +48,12 @@ const seed = {
   timestamp: new Date().toISOString(),
 }
 
-async function seedDiagram(page: Page) {
+async function seedDiagram(page: Page, snapshot = seed) {
   await page.addInitScript((snapshot) => {
     localStorage.setItem("compromise-canvas-autosave-enabled", "true")
     localStorage.setItem("compromise-canvas-autosave-flow", JSON.stringify(snapshot))
     localStorage.setItem("compromise-canvas-autosave-timestamp", snapshot.timestamp)
-  }, seed)
+  }, snapshot)
   await page.goto("/")
   // Wait for the seeded edge to render.
   await page.locator(".react-flow__edge").first().waitFor()
@@ -162,4 +162,76 @@ test("toolbar edge changes remain intact after a properties edit", async ({ page
     actionType: "Impact",
     label: "Preserved change",
   })
+})
+
+test("dragging one selected unlocked edge moves every selected unlocked route atomically", async ({ page }) => {
+  const snapshot = {
+    ...seed,
+    nodes: [
+      makeNode("n1", "Alpha", 0, 100),
+      makeNode("n2", "Beta", 650, -120),
+      makeNode("n3", "Gamma", 650, 360),
+    ],
+    edges: [
+      {
+        ...seed.edges[0],
+        id: "e1",
+        selected: true,
+        data: { ...seed.edges[0].data, unlocked: true, labelOffsetX: 10, labelOffsetY: 5 },
+      },
+      {
+        ...seed.edges[0],
+        id: "e2",
+        target: "n3",
+        selected: true,
+        data: {
+          ...seed.edges[0].data,
+          actionType: "Impact",
+          unlocked: true,
+          labelOffsetX: -20,
+          labelOffsetY: 30,
+        },
+      },
+    ],
+  }
+  await seedDiagram(page, snapshot)
+
+  const edge = (id: string) => page.locator(`.react-flow__edge[data-id="${id}"]`)
+  await expect(edge("e1")).toHaveClass(/selected/)
+  await expect(edge("e2")).toHaveClass(/selected/)
+
+  const activeLabel = page
+    .locator(".react-flow__edgelabel-renderer > div")
+    .filter({ hasText: "Lateral Movement" })
+  const secondPath = edge("e2").locator(".react-flow__edge-path")
+  const secondPathBefore = await secondPath.getAttribute("d")
+  const labelBox = await activeLabel.boundingBox()
+  expect(labelBox).not.toBeNull()
+
+  const startX = labelBox!.x + labelBox!.width / 2
+  const startY = labelBox!.y + labelBox!.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + 100, startY - 60, { steps: 8 })
+  await expect(secondPath).not.toHaveAttribute("d", secondPathBefore ?? "")
+  await page.mouse.up()
+
+  await page.getByRole("button", { name: "Save to browser storage" }).click()
+  let savedEdges = await page.evaluate(() => JSON.parse(localStorage.getItem("compromise-canvas-flow") || "{}").edges)
+  let byId = new Map<string, { data: { labelOffsetX: number; labelOffsetY: number } }>(
+    savedEdges.map((item: { id: string }) => [item.id, item]),
+  )
+  expect(byId.get("e1")?.data.labelOffsetX).toBeCloseTo(110, 5)
+  expect(byId.get("e1")?.data.labelOffsetY).toBeCloseTo(-55, 5)
+  expect(byId.get("e2")?.data.labelOffsetX).toBeCloseTo(80, 5)
+  expect(byId.get("e2")?.data.labelOffsetY).toBeCloseTo(-30, 5)
+
+  await page.keyboard.press("Control+z")
+  await page.getByRole("button", { name: "Save to browser storage" }).click()
+  savedEdges = await page.evaluate(() => JSON.parse(localStorage.getItem("compromise-canvas-flow") || "{}").edges)
+  byId = new Map(savedEdges.map((item: { id: string }) => [item.id, item]))
+  expect(byId.get("e1")?.data.labelOffsetX).toBe(10)
+  expect(byId.get("e1")?.data.labelOffsetY).toBe(5)
+  expect(byId.get("e2")?.data.labelOffsetX).toBe(-20)
+  expect(byId.get("e2")?.data.labelOffsetY).toBe(30)
 })
