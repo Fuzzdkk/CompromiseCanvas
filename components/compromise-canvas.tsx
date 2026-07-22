@@ -8,6 +8,7 @@ import {
   Background,
   Panel,
   useReactFlow,
+  SelectionMode,
   type Node,
   type Edge,
 } from "@xyflow/react"
@@ -33,6 +34,8 @@ import { useReactFlowCallbacks } from "@/hooks/use-reactflow-callbacks"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { CanvasActionsProvider } from "./canvas-actions-context"
+import SelectionContextMenu from "./selection-context-menu"
+import SelectionToolbar from "./selection-toolbar"
 
 const nodeTypes = {
   customNode: CustomNode,
@@ -47,6 +50,7 @@ export default function CompromiseCanvas() {
   const isMobile = useMobile()
   const [showMobileWarning, setShowMobileWarning] = useState(true)
   const [dismissedMobileWarning, setDismissedMobileWarning] = useState(false)
+  const [selectionContextMenuPoint, setSelectionContextMenuPoint] = useState<{ x: number; y: number } | null>(null)
 
   // Use centralized state management hook
   const {
@@ -54,6 +58,12 @@ export default function CompromiseCanvas() {
     edges,
     reactFlowInstance,
     selectedElement,
+    selectedNodeCount,
+    selectedEdgeCount,
+    arrangeableNodeCount,
+    bulkStatusNodeCount,
+    allBulkStatusNodesCompromised,
+    bulkInvestigationStatus,
     snapToGrid,
     showTemplatePanel,
     showTimelinePanel,
@@ -89,6 +99,9 @@ export default function CompromiseCanvas() {
     takeSnapshot,
     handleCopy,
     handlePaste,
+    handleSelectionLayout,
+    handleToggleSelectedCompromised,
+    handleSetSelectedInvestigationStatus,
     hasClipboardData,
     setupKeyboardHandlers,
     toast,
@@ -105,6 +118,7 @@ export default function CompromiseCanvas() {
     onEdgeClick,
     onPaneClick,
     onPaneContextMenu,
+    onSelectionChange,
     updateNode,
     updateEdge,
     handleDeleteSelected,
@@ -124,6 +138,27 @@ export default function CompromiseCanvas() {
     hasClipboardData,
     handlePaste,
   })
+
+  const multiSelectionActive = selectedNodeCount + selectedEdgeCount > 1
+
+  const handleNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      if (!multiSelectionActive || !node.selected) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectionContextMenuPoint({ x: event.clientX, y: event.clientY })
+    },
+    [multiSelectionActive],
+  )
+
+  const handleSelectionContextMenuOpenChange = useCallback((open: boolean) => {
+    if (!open) setSelectionContextMenuPoint(null)
+  }, [])
+
+  useEffect(() => {
+    if (!multiSelectionActive) setSelectionContextMenuPoint(null)
+  }, [multiSelectionActive])
 
   // Use handlers hook
   const {
@@ -197,6 +232,15 @@ export default function CompromiseCanvas() {
     [animationsEnabled, selectedElement, deleteEdgeById, handleSetEdgeActionType, handleSetEdgeLabelOffset, handleToggleEdgeUnlocked],
   )
 
+  const copySelection = useCallback(() => {
+    if (!handleCopy()) return
+    toast({
+      title: "Copied",
+      description: "Selected nodes and their internal connections were copied.",
+      variant: "default",
+    })
+  }, [handleCopy, toast])
+
   // Keyboard event listener for Delete/Backspace and Undo/Redo
   useEffect(() => {
     return setupKeyboardHandlers(handleDeleteSelected)
@@ -263,7 +307,7 @@ export default function CompromiseCanvas() {
           <AssetLibrary />
         )}
         <div className="flex-1 relative" ref={reactFlowWrapper}>
-          <CanvasActionsProvider updateNode={updateNode}>
+          <CanvasActionsProvider updateNode={updateNode} multiSelectionActive={multiSelectionActive}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -287,18 +331,24 @@ export default function CompromiseCanvas() {
               snapToGrid={snapToGrid}
               snapGrid={[15, 15]}
               onNodeClick={onNodeClick}
+              onNodeContextMenu={handleNodeContextMenu}
               onEdgeClick={onEdgeClick}
               onPaneClick={onPaneClick}
               onPaneContextMenu={onPaneContextMenu}
+              onSelectionChange={onSelectionChange}
               className="ip-canvas"
               // Performance optimizations for smooth dragging
               nodesDraggable={true}
               nodesConnectable={true}
               elementsSelectable={true}
-              selectNodesOnDrag={false}
-              // Enable multi-selection
+              selectNodesOnDrag={true}
+              // Drag an empty area to select. Hold Space or use the middle mouse button to pan.
+              selectionOnDrag={true}
+              selectionMode={SelectionMode.Full}
+              selectionKeyCode="Shift"
               multiSelectionKeyCode="Shift"
-              panOnDrag={true}
+              panOnDrag={[1]}
+              panActivationKeyCode="Space"
               zoomOnScroll={true}
               zoomOnPinch={true}
               zoomOnDoubleClick={false}
@@ -308,15 +358,33 @@ export default function CompromiseCanvas() {
               // Disable expensive features during interaction
               connectionLineType={"smoothstep" as any}
               connectionLineStyle={{ strokeWidth: 2, stroke: "#8B5CF6" }}
+              deleteKeyCode={null}
             >
+              {multiSelectionActive && (
+                <Panel position="top-right" className="z-30 m-3">
+                  <SelectionToolbar
+                    selectedNodeCount={selectedNodeCount}
+                    selectedEdgeCount={selectedEdgeCount}
+                    arrangeableNodeCount={arrangeableNodeCount}
+                    bulkStatusNodeCount={bulkStatusNodeCount}
+                    allBulkStatusNodesCompromised={allBulkStatusNodesCompromised}
+                    bulkInvestigationStatus={bulkInvestigationStatus}
+                    onCopy={copySelection}
+                    onDelete={handleDeleteSelected}
+                    onLayout={handleSelectionLayout}
+                    onToggleCompromised={handleToggleSelectedCompromised}
+                    onSetInvestigationStatus={handleSetSelectedInvestigationStatus}
+                  />
+                </Panel>
+              )}
               <Controls />
               <Background variant={"dots" as any} gap={12} size={1} color="#4B5563" />
-              <Panel position="top-left" className="p-2 text-sm text-gray-400">
+              <Panel position="top-left" className="z-10 p-2 text-sm text-gray-400">
                 <CanvasTitle title={canvasTitle} onTitleChange={setCanvasTitle} />
                 <div className="mt-2">
                   {nodes.length === 0 && edges.length === 0
                     ? "Start by dragging assets from the left panel or open a template."
-                    : "Drag assets from the left panel to add nodes."}
+                    : "Drag to select. Hold Space to pan."}
                 </div>
               </Panel>
               <Panel position="bottom-right" className="p-2 text-xs text-gray-500">
@@ -325,6 +393,22 @@ export default function CompromiseCanvas() {
                 <span className="text-xs opacity-70">Developed with AI assistance</span>
               </Panel>
             </ReactFlow>
+            <SelectionContextMenu
+              open={selectionContextMenuPoint !== null}
+              point={selectionContextMenuPoint}
+              onOpenChange={handleSelectionContextMenuOpenChange}
+              selectedNodeCount={selectedNodeCount}
+              selectedEdgeCount={selectedEdgeCount}
+              arrangeableNodeCount={arrangeableNodeCount}
+              bulkStatusNodeCount={bulkStatusNodeCount}
+              allBulkStatusNodesCompromised={allBulkStatusNodesCompromised}
+              bulkInvestigationStatus={bulkInvestigationStatus}
+              onCopy={copySelection}
+              onDelete={handleDeleteSelected}
+              onLayout={handleSelectionLayout}
+              onToggleCompromised={handleToggleSelectedCompromised}
+              onSetInvestigationStatus={handleSetSelectedInvestigationStatus}
+            />
           </CanvasActionsProvider>
         </div>
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
@@ -337,7 +421,14 @@ export default function CompromiseCanvas() {
             Open Timeline
           </Button>
         </div>
-        <PropertiesPanel selectedElement={selectedElement} updateNode={updateNode} updateEdge={updateEdge} onDelete={handleDeleteSelected} />
+        <PropertiesPanel
+          selectedElement={selectedElement}
+          selectedNodeCount={selectedNodeCount}
+          selectedEdgeCount={selectedEdgeCount}
+          updateNode={updateNode}
+          updateEdge={updateEdge}
+          onDelete={handleDeleteSelected}
+        />
       </div>
 
       {/* Timeline Modal */}

@@ -18,7 +18,7 @@ export const createEdgeTypes = (
     <CustomEdge
       {...props}
       animationsEnabled={animationsEnabled}
-      selected={selectedElement?.id === props.id && selectedElement?.type === "customEdge"}
+      selected={props.selected || (selectedElement?.id === props.id && selectedElement?.type === "customEdge")}
       onDeleteEdge={onDeleteEdge}
       onSetEdgeActionType={onSetEdgeActionType}
       onSetEdgeLabelOffset={onSetEdgeLabelOffset}

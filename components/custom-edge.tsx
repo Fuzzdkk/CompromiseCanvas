@@ -36,6 +36,7 @@ import {
   getMitreTechniqueUrl,
   normalizeMitreTechniqueReferences,
 } from "@/lib/mitre-attack"
+import { useCanvasActions } from "./canvas-actions-context"
 
 interface CustomEdgeProps extends EdgeProps<Edge<EdgeData>> {
   animationsEnabled?: boolean
@@ -64,6 +65,7 @@ const CustomEdge = memo(function CustomEdge({
   onSetEdgeLabelOffset,
   onToggleEdgeUnlocked,
 }: CustomEdgeProps) {
+  const { multiSelectionActive } = useCanvasActions()
   const unlocked = !!data?.unlocked
   // Track hover so the quick-action toolbar can appear without selecting the edge.
   const [hovered, setHovered] = useState(false)
@@ -337,7 +339,7 @@ const CustomEdge = memo(function CustomEdge({
   const baseEdgeStyle = getEdgeStyle(data?.actionType)
 
   const flowAnimation = animationsEnabled ? "edge-flow 2.5s linear infinite" : ""
-  const pulseAnimation = selected ? "edge-pulse 1.5s ease-in-out infinite" : ""
+  const pulseAnimation = selected && !multiSelectionActive ? "edge-pulse 1.5s ease-in-out infinite" : ""
   const animationValue = [flowAnimation, pulseAnimation].filter(Boolean).join(", ")
 
   // Apply selection styling if edge is selected
@@ -447,7 +449,7 @@ const CustomEdge = memo(function CustomEdge({
         id={id}
         labelX={labelX}
         labelY={labelY}
-        isVisible={hovered || selected || menuOpen || pinned}
+        isVisible={!multiSelectionActive && (hovered || selected || menuOpen || pinned)}
         currentActionType={data?.actionType}
         unlocked={unlocked}
         onSetActionType={(actionType) => onSetEdgeActionType?.(id, actionType)}
